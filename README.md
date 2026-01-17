@@ -1,110 +1,94 @@
-# Task 1 PyTorch Baseline
+# Dataset Structure
 
-This package provides a simple multi-modal baseline for Task 1 blockage
-prediction using RGB-D video frames and radio E2 features. It aligns video,
-radio, and annotations by timestamp and predicts the blockage state at
-`t + dt` (default `dt = 0.142s`).
+This folder contains a consolidated dataset for Task 1 and Task 2, with one scenario per experiment and a single CSV index for loading. The dataset for Task 3 uses the same data of Task 1.
 
-## Setup
-Create a conda environment and install dependencies:
+## Layout
 
-```bash
-conda env create -f baselines/task1_pytorch/environment.yml
-conda activate task1-baseline
-pip install -e baselines/task1_pytorch
+```
+dataset/
+  task1/exp1..exp5/
+    video/frames.csv
+    video/color/
+    video/disparity/
+    radio/E2.csv
+    radio/SRS.json
+    annotations/*.csv
+  task2/exp6..exp8/
+    video/frames.csv
+    video/color/
+    video/disparity/
+    radio/E2.csv
+    radio/SRS.json
+    annotations/*.csv
+  calibration/
+    nerian_gnb_1_calib.yaml
+  index.csv
 ```
 
-Note: Dependencies are managed via the conda environment files; there is no
-`requirements.txt` to install.
+## Index
 
-GPU setup (CUDA):
+`dataset/index.csv` has one row per scenario with dataset-relative paths.
 
-```bash
-conda env create -f baselines/task1_pytorch/environment.gpu.yml
-conda activate task1-baseline
-pip install -e baselines/task1_pytorch
-```
+Columns:
 
-Training will automatically use CUDA if available, or you can force it with
-`--device cuda`.
+- `task`: task1 or task2
+- `scenario_id`: exp1..exp8
+- `scenario_name`: short label
+- `video_frames_csv`: path to frames CSV
+- `video_color_dir`: path to color frames directory
+- `video_disparity_dir`: path to disparity frames directory
+- `radio_e2`: path to E2 CSV
+- `radio_srs`: path to SRS JSON
+- `annotation`: path to annotation CSV
+- `notes`: short scenario description
 
-## Quick start
-Train on exp1..exp4 and validate on exp5:
+## Timestamps
 
-```bash
-python -m task1_baseline.train \
-  --dataset-root dataset \
-  --train-scenarios exp1,exp2,exp3,exp4 \
-  --val-scenarios exp5 \
-  --video-mode rgbd \
-  --image-size 128 \
-  --epochs 15 \
-  --batch-size 16
-```
+- Video timestamps are seconds (float).
+- Radio timestamps are seconds (float) and keep absolute time. Radio files are provided as `E2.csv` and `SRS.json`.
+- Annotation timestamps are seconds (float).
 
-Leave-one-scenario-out preset (hold out exp5):
+## Calibration
 
-```bash
-python -m task1_baseline.train \
-  --dataset-root dataset \
-  --preset loso \
-  --holdout-scenario exp5 \
-  --video-mode rgbd \
-  --image-size 128 \
-  --epochs 15 \
-  --batch-size 16
-```
+Stereo calibration is provided in `dataset/calibration/nerian_gnb_1_calib.yaml`
+for depth reconstruction from disparity (intrinsics, extrinsics, and Q matrix).
 
-Pretrained visual backbone (useful for small datasets):
+## Task 1
 
-```bash
-python -m task1_baseline.train \
-  --dataset-root dataset \
-  --backbone resnet18 \
-  --pretrained \
-  --freeze-backbone \
-  --video-mode rgbd \
-  --epochs 10
-```
+### Annotations
 
-Note: `--pretrained` downloads torchvision weights if not cached. If you are
-offline, pre-download the weights once or copy them into your Torch cache.
+Annotation CSV contains per-frame labels:
+`timestamp,state` with `state` in `{no, partial, full}`.
+The file name varies per experiment; use `index.csv` to locate it.
 
-Evaluate a saved checkpoint:
+### Proposal
 
-```bash
-python -m task1_baseline.eval \
-  --dataset-root dataset \
-  --scenarios exp5 \
-  --checkpoint runs/task1_baseline/best.pt
-```
+Predict the blockage state at `t + dt` using video and radio inputs, with fixed
+`dt = 142 ms` (aligned to the video sampling interval).
 
-Write per-frame predictions:
+## Task 2
 
-```bash
-python -m task1_baseline.predict \
-  --dataset-root dataset \
-  --scenarios exp5 \
-  --checkpoint runs/task1_baseline/best.pt \
-  --output runs/task1_baseline/exp5_predictions.csv
-```
+### Annotations
 
-## Model overview
-The Task 1 baseline uses a two-branch network to fuse video and radio:
-- Visual branch: either a lightweight 3-layer CNN (stride-2 conv + BN + ReLU + global
-  average pool) or a ResNet18 backbone. The first conv is adapted for RGB-D (4 ch),
-  RGB (3 ch), or disparity-only (1 ch) inputs.
-- Radio branch: a 2-layer MLP (Linear -> ReLU -> Dropout -> Linear -> ReLU) that
-  embeds the E2 feature vector.
-- Fusion: concatenate visual and radio features, then classify with a small MLP
-  into 3 blockage classes (no/partial/full).
-- Normalization: E2 features are standardized using train-set mean/std. Class
-  weights can be auto-computed for cross-entropy via `--class-weights auto`.
+Annotation CSV contains per-sample translation of Quectel w.r.t. liteon:
+`timestamp,x,y,z` (mm), expressed in the liteon frame.
+The file name varies per experiment; use `index.csv` to locate it.
 
-## Performance
-Best validation metrics observed in the current tests: val loss 0.1486, acc 0.973, macro F1 0.785
+### Proposal
 
-## Notes
-- `dataset/index.csv` is used to locate frames, radio, and annotations.
-- Alignment uses nearest-neighbor matching with configurable tolerances.
-- `--video-mode none` enables a radio-only baseline.
+Predict the UE position at time `t` using video and radio inputs.
+
+## Task 3
+
+### Proposal
+
+Task 3 uses the same video and radio inputs as Task 1, but with a
+different objective: predict the future SRS channel measurement. For each E2
+sample at time `t`, predict `srs_ch` at `t + dt`, with fixed `dt = 50 ms`
+(aligned to the E2 sampling interval). Models may use past SRS values as
+inputs, in addition to video and E2.
+
+## Notes on `frames.csv`
+
+`video/frames.csv` uses paths relative to the `video/` directory:
+`color/img_XXXX.png` and `disparity/img_XXXX.png`.
